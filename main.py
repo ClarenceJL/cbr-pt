@@ -132,12 +132,12 @@ def train_wrapper(opt):
     # build model
     model = CBR(opt)
     model = torch.nn.DataParallel(model, device_ids=opt['gpu_ids']).cuda()
-
+    print(model)
     # load pretrained weights (optional)
 
     # create optimizer
     optimizer = optim.Adam(model.parameters(), lr=opt["lr_base"], weight_decay=opt["weight_decay"])
-    criterion = CBRLoss()
+    criterion = CBRLoss(opt['lambda_reg'])
     #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=opt["step_size"], gamma=opt["step_gamma"])
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, opt['num_epochs'], eta_min=1e-7)
 
@@ -148,11 +148,11 @@ def train_wrapper(opt):
                           ['epoch', 'cas', 'loss', 'cls_loss', 'reg_loss', 'acc', 'off'])
 
     # make dataloader(s)
-    train_loader = torch.utils.data.DataLoader(ANetDatasetCBR(opt, subset=["training"]),
+    train_loader = torch.utils.data.DataLoader(ANetDatasetCBR(opt, mode='train', subset=["training"]),
                                                batch_size=opt["batch_size"], shuffle=True,
                                                num_workers=8, pin_memory=True, drop_last=True)
 
-    test_loader = torch.utils.data.DataLoader(ANetDatasetCBR(opt, subset=["validation"]),  # todo: customize collate_fn
+    test_loader = torch.utils.data.DataLoader(ANetDatasetCBR(opt, mode='test', subset=["validation"]),  # todo: customize collate_fn
                                               batch_size=opt["test_batch_size"], shuffle=False,
                                               num_workers=8, pin_memory=True, drop_last=True)
 
@@ -162,9 +162,10 @@ def train_wrapper(opt):
     for epoch in range(opt['num_epochs']):
         scheduler.step()
         train_epoch(epoch, model, train_loader, optimizer, criterion, train_logger)
-        loss, acc = test_epoch(epoch, model, test_loader, criterion, test_logger, opt['cas_step'], opt['num_classes'])
         state = {'epoch': epoch + 1, 'state_dict': model.state_dict()}
         torch.save(state, opt['checkpoint_path'] + '/model_checkpoint.pth.tar')
+        #if epoch >= 4:
+        loss, acc = test_epoch(epoch, model, test_loader, criterion, test_logger, opt['cas_step'], opt['num_classes'])
         if min_val_loss > loss:
             min_val_loss = loss
             torch.save(state, opt['checkpoint_path'] + '/model_best_loss.pth.tar')
@@ -176,6 +177,7 @@ def train_wrapper(opt):
 def inference_wrapper(opt):
     # build model
     model = CBR(opt)
+    print(model)
     # load checkpoint
     checkpoint = torch.load(opt["checkpoint_path"] + "/model_best_loss.pth.tar")
     base_dict = {'.'.join(k.split('.')[1:]): v for k, v in list(checkpoint['state_dict'].items())}
@@ -246,7 +248,7 @@ def inference_wrapper(opt):
 
 def main(opt):
     if opt["mode"] == "train":
-        print('Start training classifier...')
+        print('Start training CBR...')
         train_wrapper(opt)
         print('Training done')
     elif opt["mode"] == "infer":
@@ -260,7 +262,7 @@ def main(opt):
     elif opt["mode"] == "evaluation":
         evaluation_detection(opt)
     else:
-        raise NotImplementedError('Mode {} not supported'.format(opt["mode"]))
+        raise NotImplementedError
 
 
 if __name__ == "__main__":

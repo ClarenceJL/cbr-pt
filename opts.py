@@ -108,6 +108,10 @@ def parse_opt():
         default=0.001
     )
     parser.add_argument(
+        '--weight_decay',
+        type=float,
+        default=0.0001)
+    parser.add_argument(
         '--num_epochs',
         type=int,
         default=20
@@ -122,6 +126,13 @@ def parse_opt():
         type=float,
         default=0.1
     )
+    parser.add_argument(
+        '--gpu_ids',
+        default='0',
+        type=str,
+        help='gpu_idxs: e.g. 0, 0,1,2 0,2'
+    )
+
     args = parser.parse_args()
     return args
 

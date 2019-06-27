@@ -6,8 +6,8 @@ import numpy as np
 import json
 import random
 from Evaluation.eval_proposal import wrapper_segment_iou
-from offset_transform import *
-from temporal_transform import *
+#from offset_transform import *
+from temporal_transform import temporal_avgpool_sample
 
 
 def load_json(file):
@@ -18,6 +18,8 @@ def load_json(file):
 
 class ANetDatasetCBR(data.Dataset):
     def __init__(self, opt, mode, subset, balance_fg_bg=True):
+        super(ANetDatasetCBR, self).__init__()
+        print('Create dataset for {}'.format(mode))
         self.mode = mode
         self.subset = subset
         self.frames_per_unit = opt['frames_per_unit']
@@ -29,7 +31,8 @@ class ANetDatasetCBR(data.Dataset):
         self.feat_path = opt['feat_path']
         self._load_annotation(opt['anno_path'])
         self._load_class_index()
-        self._load_proposals(opt['prop_path'])
+        self._load_proposals(opt['proposal_path'])
+        print('    Number of {} proposals {}'.format(mode, self.__len__()))
 
     def _load_annotation(self, anno_file):
         anno = load_json(anno_file)
@@ -62,7 +65,7 @@ class ANetDatasetCBR(data.Dataset):
                 scores = np.ones([cands.shape[0]])
 
             # match proposals to ground-truth
-            if self.mode == 'train':
+            if self.mode != 'infer':
                 assert len(self.ground_truth_anno[vid]['annotations']) > 0
                 gts = []
                 for gt in self.ground_truth_anno[vid]['annotations']:
@@ -100,8 +103,10 @@ class ANetDatasetCBR(data.Dataset):
                     })
 
         # sample from background proposals
-        if self.mode == 'train' and self.balance_fg_bg:
-            neg_proposals = random.sample(neg_proposals, int(len(self.proposals) * self.bf_ratio))
+        if self.mode != 'infer' and self.balance_fg_bg:
+            num_neg_proposals = int(len(self.proposals) * self.bf_ratio)
+            print('    Sample {} out of {} background samples'.format(num_neg_proposals, len(neg_proposals)))
+            neg_proposals = random.sample(neg_proposals, num_neg_proposals)
             self.proposals += neg_proposals
 
     def generate_input(self, feat, start_unit, end_unit):
@@ -134,7 +139,7 @@ class ANetDatasetCBR(data.Dataset):
             data = self.generate_input(feat, start_unit, end_unit)
             target = self.generate_target(label, start_unit, end_unit, gt_start_unit, gt_end_unit)
             return data, target
-        elif self.mode == 'eval':
+        elif self.mode == 'test':
             return feat, start_unit, end_unit, gt_start_unit, gt_end_unit, label
         else:
             return feat, start_unit, end_unit, entry['video_id'], entry['score'], frames_per_unit / fps

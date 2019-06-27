@@ -8,7 +8,7 @@ Model
 
 
 class MultiLayer(nn.Module):
-    def __init__(self, inplane, hiddenplane=1000, outplane=201*3, dropout=True):
+    def __init__(self, inplane, hiddenplane=512, outplane=201*3, dropout=True):
         super(MultiLayer, self).__init__()
         self.fc1 = nn.Linear(inplane, hiddenplane)
         self.relu = nn.ReLU(inplace=True)
@@ -21,7 +21,7 @@ class MultiLayer(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 if hasattr(m, 'bias'):
-                    nn.init.constant(m.bias, 0)
+                    nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
@@ -32,14 +32,14 @@ class MultiLayer(nn.Module):
 
 
 class CBR(nn.Module):
-    def __init__(self, opt, inplane=None):
+    def __init__(self, opt):
         super(CBR, self).__init__()
         self.num_class = opt['num_classes']
-        if inplane == None:
-            inplane = opt['']
-        hidplane = 1000
+        inplane = 3 * opt['feature_dim']  # ctx-before | in-action | ctx-after
+        hidplane = 512
+        outplane = 3 * (1+opt['num_classes'])
 
-        self.cls_reg = MultiLayer(inplane, hidplane, (1+self.num_class)*3)
+        self.cls_reg = MultiLayer(inplane, hidplane, outplane)
 
     def forward(self, x):
         return self.cls_reg(x)
@@ -73,20 +73,23 @@ class CBRLoss(nn.Module):
         start_offset_pred = output[:, 1+num_class:2*(1+num_class)]
         end_offset_pred = output[:, :2*(1+num_class):]
 
-        labels = target[:, 0]
+        labels = target[:, 0].long()
         offsets = target[:, 1:]
 
         # classification loss
         cls_loss = self.cls_loss(cls_score_pred, labels)
 
         # regression loss
-        pick_start_offset_pred = []
-        pick_end_offset_pred = []
-        for i in range(batch_size):
-            pick_start_offset_pred.append(start_offset_pred[i, labels[i]])
-            pick_end_offset_pred.append(end_offset_pred[i, labels[i]])
-        pick_start_offset_pred = torch.Tensor(pick_start_offset_pred)
-        pick_end_offset_pred = torch.Tensor(pick_end_offset_pred)
+        # pick_start_offset_pred = []
+        # pick_end_offset_pred = []
+        # for i in range(batch_size):
+        #     pick_start_offset_pred.append(start_offset_pred[i, labels[i]])
+        #     pick_end_offset_pred.append(end_offset_pred[i, labels[i]])
+        # pick_start_offset_pred = torch.Tensor(pick_start_offset_pred)
+        # pick_end_offset_pred = torch.Tensor(pick_end_offset_pred)
+
+        pick_start_offset_pred = start_offset_pred[list(range(batch_size)), labels.tolist()]
+        pick_end_offset_pred = end_offset_pred[list(range(batch_size)), labels.tolist()]
         offsets_pred = torch.stack((pick_start_offset_pred, pick_end_offset_pred), -1)  # (b, 2)
         fg_mask = labels.ne(0).float().unsqueeze(-1)  # (b, 1)
         reg_loss = torch.mean(fg_mask * self.reg_loss(offsets_pred, offsets))
