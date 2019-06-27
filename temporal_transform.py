@@ -48,7 +48,9 @@ def temporal_avgpool_sample(feat, start_idx, end_idx, sample_len):
         if lb == rb or lbin == rbin:
             result[i] = feat[lbin]
         else:
-            assert lbin < rbin
+            if lbin > rbin:
+                print(lbin, rbin, start_idx, end_idx)
+                raise ValueError
             weight = np.ones([rbin-lbin+1])
             weight[0] -= lb-lbin
             weight[-1] -= (rbin+1) - rb

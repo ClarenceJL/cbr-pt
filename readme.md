@@ -4,6 +4,12 @@ PyTorch implementation for "Cascaded Boundary Regression for Temporal Action Det
 ## Requirement
 - Python 3
 - PyTorch 0.4 or above
+- Encoded video feature
+- Original proposals for training (e.g. sliding window, TAG, TURN, BSN, etc.)
+
+## Support Dataset
+- ActivityNet
+- THUMOS 14 (TODO)
 
 ## Instruction
 - modify file path and hyper-parameters in "opts.py" or "run.sh"

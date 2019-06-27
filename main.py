@@ -11,6 +11,7 @@ from post_process import post_processing_wrapper
 from eval import evaluation_detection
 from utils import Logger, calculate_accuracy, calculate_offset
 
+import pdb
 
 prob_weights = np.array([0.8, 0.1, 0.1])
 
@@ -75,9 +76,9 @@ def test_epoch(epoch, model, data_loader, criterion, logger, num_classes=200, ca
                 inputs.append(data_loader.dataset.generate_input(feat[b], start_unit[b], end_unit[b]))
                 targets.append(data_loader.dataset.generate_target(label[b], start_unit[b], end_unit[b],
                                                                   gt_start_unit[b], gt_end_unit[b]))
-
-            inputs = torch.Tensor(inputs)
-            targets = torch.Tensor(targets)
+            inputs = torch.stack(inputs, 0)
+            targets = torch.stack(targets, 0)
+            targets = targets.cuda()
 
             # run model for current cascade
             outputs = model(inputs)
@@ -101,8 +102,14 @@ def test_epoch(epoch, model, data_loader, criterion, logger, num_classes=200, ca
             # final_action_prob *= action_prob
             final_action_prob = final_action_prob + prob_weights[k] * action_prob
             pred_action = torch.argmax(final_action_prob, 1) + 1  # (b,), 1 ~ 200
-            start_unit = start_unit + outputs[list(range(mini_batch_size)), (1+num_classes+pred_action.int()).tolist()]
-            end_unit = end_unit + outputs[list(range(mini_batch_size)), (2*(1+num_classes)+pred_action.int()).tolist()]
+            start_unit = [start_unit[i] + outputs[i, 1+num_classes+pred_action[i]].item() for i in range(mini_batch_size)]
+            end_unit = [end_unit[i] + outputs[i, 2*(1+num_classes)+pred_action[i]].item() for i in range(mini_batch_size)]
+            for i in range(mini_batch_size):
+                if start_unit[i] > end_unit[i]:
+                    new_su = (start_unit[i]+end_unit[i]) / 2.0 - 0.2
+                    new_eu = (start_unit[i]+end_unit[i]) / 2.0 + 0.2
+                    start_unit[i] = new_su
+                    end_unit[i] = new_eu
 
     epoch_losses_cas /= (n_iter + 1)
     epoch_acc_cas /= (n_iter + 1)
@@ -119,13 +126,19 @@ def test_epoch(epoch, model, data_loader, criterion, logger, num_classes=200, ca
             'off': epoch_off_cas[k]
         })
 
-    print('Epoch {} validation (cascade 0) loss: {} cls_loss: {}, reg_loss: {} acc: {} acc3: {}'.format(
+    print('Epoch {} validation (cascade 0) loss: {} cls_loss: {}, reg_loss: {} acc: {} off: {}'.format(
      epoch, epoch_losses_cas[0, 0], epoch_losses_cas[0, 1], epoch_losses_cas[0, 2], epoch_acc_cas[0], epoch_off_cas[0]))
     for k in range(1, cas_num):
-        print('                    (cascade {}) loss: {} cls_loss: {}, reg_loss: {} acc: {} acc3: {}'.format(
+        print('                    (cascade {}) loss: {} cls_loss: {}, reg_loss: {} acc: {} off: {}'.format(
          k, epoch_losses_cas[k, 0], epoch_losses_cas[k, 1], epoch_losses_cas[k, 2], epoch_acc_cas[k], epoch_off_cas[k]))
 
     return epoch_losses_cas[cas_num-1, 0], epoch_acc_cas[cas_num-1]
+
+
+def custom_collate_fn(x):
+    mini_batch_size = len(x)
+    num_vars = len(x[0])
+    return [[x[b][v] for b in range(mini_batch_size)] for v in range(num_vars)]
 
 
 def train_wrapper(opt):
@@ -152,9 +165,9 @@ def train_wrapper(opt):
                                                batch_size=opt["batch_size"], shuffle=True,
                                                num_workers=8, pin_memory=True, drop_last=True)
 
-    test_loader = torch.utils.data.DataLoader(ANetDatasetCBR(opt, mode='test', subset=["validation"]),  # todo: customize collate_fn
-                                              batch_size=opt["test_batch_size"], shuffle=False,
-                                              num_workers=8, pin_memory=True, drop_last=True)
+    test_loader = torch.utils.data.DataLoader(ANetDatasetCBR(opt, mode='test', subset=["validation"]), shuffle=False,
+                                              batch_size=opt["test_batch_size"], num_workers=8, pin_memory=True,
+                                              drop_last=True, collate_fn=custom_collate_fn)
 
     min_val_loss = 1e8
     max_val_acc = 0
@@ -164,14 +177,14 @@ def train_wrapper(opt):
         train_epoch(epoch, model, train_loader, optimizer, criterion, train_logger)
         state = {'epoch': epoch + 1, 'state_dict': model.state_dict()}
         torch.save(state, opt['checkpoint_path'] + '/model_checkpoint.pth.tar')
-        #if epoch >= 4:
-        loss, acc = test_epoch(epoch, model, test_loader, criterion, test_logger, opt['cas_step'], opt['num_classes'])
-        if min_val_loss > loss:
-            min_val_loss = loss
-            torch.save(state, opt['checkpoint_path'] + '/model_best_loss.pth.tar')
-        if max_val_acc < acc:
-            max_val_acc = acc
-            torch.save(state, opt['checkpoint_path'] + '/model_best_acc.pth.tar')
+        if epoch >= 4:
+            loss, acc = test_epoch(epoch, model, test_loader, criterion, test_logger, opt['num_classes'], opt['cas_step'])
+            if min_val_loss > loss:
+                min_val_loss = loss
+                torch.save(state, opt['checkpoint_path'] + '/model_best_loss.pth.tar')
+            if max_val_acc < acc:
+                max_val_acc = acc
+                torch.save(state, opt['checkpoint_path'] + '/model_best_acc.pth.tar')
 
 
 def inference_wrapper(opt):
@@ -187,8 +200,8 @@ def inference_wrapper(opt):
 
     # make dataloader
     data_loader = torch.utils.data.DataLoader(ANetDatasetCBR(opt, mode='infer', subset=opt['infer_subset']),
-                                              batch_size=opt["test_batch_size"], shuffle=False,
-                                              num_workers=8, pin_memory=True, drop_last=False)
+                                              batch_size=opt["test_batch_size"], shuffle=False, num_workers=8,
+                                              pin_memory=True, drop_last=False, collate_fn=custom_collate_fn)
 
     class_info = pd.read_csv('data/class_index.csv')
     class_names = class_info.class_name.values
@@ -204,7 +217,7 @@ def inference_wrapper(opt):
             for b in range(mini_batch_size):
                 inputs.append(data_loader.dataset.generate_input(feat[b], start_unit[b], end_unit[b]))
 
-            inputs = torch.Tensor(inputs)
+            inputs = torch.stack(inputs, 0)
 
             # run model for current cascade
             outputs = model(inputs)
@@ -218,8 +231,14 @@ def inference_wrapper(opt):
             action_prob = torch.softmax(action_score, 1)
             final_action_prob = final_action_prob + prob_weights[k] * action_prob
             pred_action = torch.argmax(final_action_prob, 1) + 1  # (b,), 1 ~ 200
-            start_unit = start_unit + outputs[list(range(mini_batch_size)), (1 + opt['num_classes'] + pred_action.int()).tolist()]
-            end_unit = end_unit + outputs[list(range(mini_batch_size)), (2 * (1 + opt['num_classes']) + pred_action.int()).tolist()]
+            start_unit = [start_unit[i] + outputs[i, 1+opt['num_classes']+pred_action[i]].item() for i in range(mini_batch_size)]
+            end_unit = [end_unit[i] + outputs[i, 2*(1+opt['num_classes'])+pred_action[i]].item() for i in range(mini_batch_size)]
+            for i in range(mini_batch_size):
+                if start_unit[i] > end_unit[i]:
+                    new_su = (start_unit[i]+end_unit[i]) / 2.0 - 0.5
+                    new_eu = (start_unit[i]+end_unit[i]) / 2.0 + 0.5
+                    start_unit[i] = new_su
+                    end_unit[i] = new_eu
 
         cls_score = torch.max(final_action_prob, 1)
         label = torch.argmax(final_action_prob, 1)  # 0~199
