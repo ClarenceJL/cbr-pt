@@ -90,9 +90,6 @@ def test_epoch(epoch, model, data_loader, criterion, logger, num_classes=200, ca
             epoch_acc_cas[k] += calculate_accuracy(outputs, targets)
             epoch_off_cas[k] += calculate_offset(outputs, targets)
 
-            if k == cas_num - 1:
-                break
-
             # update the boundaries of current proposals
             outputs = outputs.cpu().detach()
             action_score = outputs[:, 1:1+num_classes]
@@ -101,6 +98,10 @@ def test_epoch(epoch, model, data_loader, criterion, logger, num_classes=200, ca
             # but later experiments showed that weighted average gives more stable results.
             # final_action_prob *= action_prob
             final_action_prob = final_action_prob + prob_weights[k] * action_prob
+
+            if k == cas_num - 1:
+                break
+
             pred_action = torch.argmax(final_action_prob, 1) + 1  # (b,), 1 ~ 200
             start_unit = [start_unit[i] + outputs[i, 1+num_classes+pred_action[i]].item() for i in range(mini_batch_size)]
             end_unit = [end_unit[i] + outputs[i, 2*(1+num_classes)+pred_action[i]].item() for i in range(mini_batch_size)]
@@ -203,11 +204,14 @@ def inference_wrapper(opt):
                                               batch_size=opt["test_batch_size"], shuffle=False, num_workers=8,
                                               pin_memory=True, drop_last=False, collate_fn=custom_collate_fn)
 
-    class_info = pd.read_csv('data/class_index.csv')
+    class_info = pd.read_csv('data/anet/class_index.csv')
     class_names = class_info.class_name.values
 
     result_dict = {}
-    for feat, start_unit, end_unit, video_id, prop_score, unit_sec_ratio in data_loader:
+    for i, (feat, start_unit, end_unit, video_id, prop_score, unit_sec_ratio) in enumerate(data_loader):
+        if i % 200 == 0:
+            print('{}-{}'.format(i*200, (i+1)*200))
+
         mini_batch_size = len(feat)
         final_action_prob = torch.zeros([mini_batch_size, opt['num_classes']])
         for k in range(opt['cas_step']):
@@ -222,14 +226,12 @@ def inference_wrapper(opt):
             # run model for current cascade
             outputs = model(inputs)
 
-            if k == opt['cas_step'] - 1:
-                break
-
             # update the boundaries of current proposals
             outputs = outputs.cpu().detach()
             action_score = outputs[:, 1:1 + opt['num_classes']]
             action_prob = torch.softmax(action_score, 1)
             final_action_prob = final_action_prob + prob_weights[k] * action_prob
+
             pred_action = torch.argmax(final_action_prob, 1) + 1  # (b,), 1 ~ 200
             start_unit = [start_unit[i] + outputs[i, 1+opt['num_classes']+pred_action[i]].item() for i in range(mini_batch_size)]
             end_unit = [end_unit[i] + outputs[i, 2*(1+opt['num_classes'])+pred_action[i]].item() for i in range(mini_batch_size)]
@@ -240,9 +242,8 @@ def inference_wrapper(opt):
                     start_unit[i] = new_su
                     end_unit[i] = new_eu
 
-        cls_score = torch.max(final_action_prob, 1)
-        label = torch.argmax(final_action_prob, 1)  # 0~199
-        score = prop_score * cls_score
+        cls_score, label = torch.max(final_action_prob, 1)  # 0~199
+        score = np.array(prop_score) * cls_score.numpy()
 
         for vid, lab, scr, su, eu, ratio in zip(video_id, label, score, start_unit, end_unit, unit_sec_ratio):
             if vid not in result_dict.keys():

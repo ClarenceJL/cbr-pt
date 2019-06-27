@@ -130,9 +130,12 @@ class ANetDatasetCBR(data.Dataset):
 
         start_unit = entry['segment'][0] * fps / frames_per_unit
         end_unit = entry['segment'][1] * fps / frames_per_unit
+
+        if self.mode == 'infer':
+            return feat, start_unit, end_unit, entry['video_id'], entry['score'], frames_per_unit / fps
+
         gt_start_unit = entry['gt_segment'][0] * fps / frames_per_unit
         gt_end_unit = entry['gt_segment'][1] * fps / frames_per_unit
-
         label = self.class_index[entry['label']]
 
         if self.mode == 'train':
@@ -141,8 +144,6 @@ class ANetDatasetCBR(data.Dataset):
             return data, target
         elif self.mode == 'test':
             return feat, start_unit, end_unit, gt_start_unit, gt_end_unit, label
-        else:
-            return feat, start_unit, end_unit, entry['video_id'], entry['score'], frames_per_unit / fps
 
     def __len__(self):
         return len(self.proposals)

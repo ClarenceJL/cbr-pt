@@ -45,6 +45,31 @@ class CBR(nn.Module):
         return self.cls_reg(x)
 
 
+class ProposalClassifier(nn.Module):
+    def __init__(self, opt):
+        super(ProposalClassifier, self).__init__()
+        inplane = 3 * opt['feature_dim']
+        hidplane = 512
+        outplane = 1 + opt['num_classes']
+        self.fc1 = nn.Linear(inplane, hidplane)
+        self.relu = nn.ReLU(inplace=True)
+        self.fc2 = nn.Linear(hidplane, outplane)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if hasattr(m, 'bias'):
+                    nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+
 """
 Loss function
 """
@@ -97,5 +122,8 @@ class CBRLoss(nn.Module):
         loss = cls_loss + self.lambda_reg * reg_loss
 
         return {'loss': loss, 'cls_loss': cls_loss, 'reg_loss': reg_loss}
+
+
+
 
 

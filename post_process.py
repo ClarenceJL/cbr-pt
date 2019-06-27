@@ -85,7 +85,7 @@ def video_post_process(opt, video_list, video_dict):
 
 
 def video_post_process_detection(opt, video_list, video_dict):
-    class_names = pd.read_csv('data/class_index.csv')
+    class_names = pd.read_csv('data/anet/class_index.csv')
     class_names = class_names['class_name'].values
 
     for video_name in video_list:
@@ -126,7 +126,7 @@ def get_dataset_dict(anno_path, subset):
 def post_processing_wrapper(opt, subset='validation', num_threads=8):
     # print('Playground version: skip PEM and evaluate the PGM proposals + average action score')
 
-    video_dict = get_dataset_dict(opt['video_anno'], subset)
+    video_dict = get_dataset_dict(opt['anno_path'], subset)
     video_list = list(video_dict.keys())  # [:100]
     global result_dict
     result_dict = mp.Manager().dict()

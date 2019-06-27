@@ -22,7 +22,7 @@ def parse_opt():
     parser.add_argument(
         '--result_path',
         type=str,
-        default='/vclaire/result/detection_with_feat/result_detection_retnetprop.json')
+        default='/vclaire/result/detection_with_feat/result_detection.json')
     parser.add_argument(
         '--proposal_path',
         type=str,
